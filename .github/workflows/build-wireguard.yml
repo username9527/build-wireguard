@@ -1,4 +1,4 @@
-name: Cross-Compile WireGuard for ARM32 Soft-Float (armv7l)
+name: Cross-Compile WireGuard for ARM32 Soft-Float (armv7l/armv5)
 
 on:
   push:
@@ -33,7 +33,8 @@ jobs:
           git clone https://git.zx2c4.com/wireguard-tools
           cd wireguard-tools/src
           
-          # 通过 EXTRA_CFLAGS 追加编译选项，保留 Makefile 原有的头文件引入逻辑
+          # 1. RUNSTATEDIR=/var/run 解决 Unix Socket 路径缺失问题
+          # 2. EXTRA_CFLAGS 追加静态参数与 UAPI 缺失的头文件
           make -j$(nproc) \
             CC=arm-linux-gnueabi-gcc \
             LD=arm-linux-gnueabi-ld \
@@ -42,7 +43,7 @@ jobs:
             LDFLAGS="-static" \
             wg
             
-          # 验证架构与静态链接状态
+          # 验证二进制架构与静态链接状态
           file wg
           cd ../..
 
@@ -51,16 +52,15 @@ jobs:
           git clone https://git.zx2c4.com/wireguard-go
           cd wireguard-go
           
-          # 配置 Go 交叉编译环境变量：ARMv7 + 软浮点 (softfloat) + 禁用 CGO
+          # 关键点：GOARM=5 强制生成纯 Soft-Float 指令，解决光猫上的 Illegal instruction 问题
           export GOOS=linux
           export GOARCH=arm
-          export GOARM=7
-          export GOMIPS=softfloat
+          export GOARM=5
           export CGO_ENABLED=0
           
           go build -v -ldflags="-s -w -extldflags '-static'" -o wireguard-go
           
-          # 验证架构与静态链接状态
+          # 验证二进制架构与静态链接状态
           file wireguard-go
           cd ..
 
