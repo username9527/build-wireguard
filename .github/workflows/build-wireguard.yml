@@ -1,9 +1,41 @@
-- name: Build wireguard-tools (wg) statically
+name: Cross-Compile WireGuard for ARM32 Soft-Float (armv7l)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install ARM Soft-Float Toolchain & Build Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-arm-linux-gnueabi \
+            g++-arm-linux-gnueabi \
+            make \
+            git \
+            libmnl-dev
+
+      - name: Build wireguard-tools (wg) statically
         run: |
           git clone https://git.zx2c4.com/wireguard-tools
           cd wireguard-tools/src
           
-          # 补充 RUNSTATEDIR 与系统头文件定义
+          # 1. -DRUNSTATEDIR 解决宏未定义报错
+          # 2. -I../contrib/uapi/kernel-headers 引入自带内核头文件，解决 WGALLOWEDIP_A_FLAGS 报错
+          # 3. -static 结合 arm-linux-gnueabi-gcc 强制静态编译
           make -j$(nproc) \
             CC=arm-linux-gnueabi-gcc \
             LD=arm-linux-gnueabi-ld \
@@ -11,5 +43,38 @@
             LDFLAGS="-static" \
             wg
             
+          # 验证二进制架构与静态链接状态
           file wg
           cd ../..
+
+      - name: Build wireguard-go statically
+        run: |
+          git clone https://git.zx2c4.com/wireguard-go
+          cd wireguard-go
+          
+          # 配置 Go 交叉编译环境变量：ARMv7 + 软浮点 (softfloat) + 禁用 CGO
+          export GOOS=linux
+          export GOARCH=arm
+          export GOARM=7
+          export GOMIPS=softfloat
+          export CGO_ENABLED=0
+          
+          go build -v -ldflags="-s -w -extldflags '-static'" -o wireguard-go
+          
+          # 验证二进制架构与静态链接状态
+          file wireguard-go
+          cd ..
+
+      - name: Collect & Package Artifacts
+        run: |
+          mkdir -p output
+          cp wireguard-tools/src/wg output/
+          cp wireguard-go/wireguard-go output/
+          cd output
+          tar -czvf wireguard-armv7l-softfp-static.tar.gz wg wireguard-go
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wireguard-armv7l-softfp-static
+          path: output/wireguard-armv7l-softfp-static.tar.gz
